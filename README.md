@@ -34,7 +34,7 @@ No, not exactly. Mining profits fluctuate depending on transaction fees (these g
 
 Some may argue that this is a poor use of AWS resources. I don't necessarily disagree, but since we are only using servers that are otherwise inactive (through Spot Pricing), we are not really taking away resources that are in demand elsewhere.
 
-Overall, this is not intended to be a "get rich" scheme, but instead a way to have some fun playing around in AWS, while also earning some rewards in the process.
+Overall, this is not intended to be a "get rich" scheme, but instead a fun way to play around in AWS, while also earning some rewards in the process.
 
 
 
