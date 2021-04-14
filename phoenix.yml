@@ -1,0 +1,349 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Metadata:
+  RepoUrl: https://github.com/btw1217/phoenix
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Miner Configuration
+        Parameters:
+        - EthWallet
+
+      - Label:
+          default: SNS Configuration
+        Parameters:
+        - Email
+
+      - Label:
+          default: Instance Configuration
+        Parameters:
+        - InstanceCount
+
+      - Label:
+          default: Networking Configuration
+        Parameters:
+        - VpcId
+        - SubnetIds
+
+Parameters:
+  EthWallet:
+    Type: String
+    Description: Ethereum Wallet Address
+    Default: "0x90F06BDB6567982cF103c9317887d8Fb943D8DfB"
+    AllowedPattern: "0x[0-9a-fA-F]+"
+
+  Email:
+    Type: String
+    Description: Email for Notifications
+
+  InstanceCount:
+    Type: Number
+    Description: Max Number of Instances
+    Default: 1
+    MaxValue: 8
+
+  VpcId:
+    Description: The VPC where this stack will be deployed
+    Type: AWS::EC2::VPC::Id
+
+  SubnetIds:
+    Description: At least 3 subnets where the instances will be deployed
+    Type: List<AWS::EC2::Subnet::Id>
+
+Mappings:
+  # ImageId of 'Deep Learning AMI (Amazon Linux 2) Version 43.0' in each region
+  RegionMap:
+    us-east-1:
+      ImageId: ami-078a331927399adac
+    us-east-2:
+      ImageId: ami-01f22c507c1d9f7fa
+    us-west-1:
+      ImageId: ami-0d1d8de6730f8d064
+    us-west-2:
+      ImageId: ami-0ccf6f8b8d4a3e973
+    ca-central-1:
+      ImageId: ami-0e1528bead6d8257c
+    eu-central-1:
+      ImageId: ami-047b1df698e2b5869
+    eu-north-1:
+      ImageId: ami-0dd383b807a1ac346
+    eu-west-1:
+      ImageId: ami-00ad6b44adca6dc28
+    eu-west-2:
+      ImageId: ami-04b2ab026947c29f4
+    eu-west-3:
+      ImageId: ami-013e7060964097c4a
+    ap-northeast-1:
+      ImageId: ami-0a048955642dc77c8
+    ap-northeast-2:
+      ImageId: ami-00639315e1edf7170
+    ap-northeast-3:
+      ImageId: ami-09b36a81a49169236
+    ap-south-1:
+      ImageId: ami-0e3a482a6c20b8dca
+    ap-southeast-1:
+      ImageId: ami-03820a4d467af06b4
+    ap-southeast-2:
+      ImageId: ami-01d0d5aefa68500f2
+    sa-east-1:
+      ImageId: ami-06456fc37cf1c0923
+
+Resources:
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - !Ref InstanceRole
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        InstanceType: g4dn.xlarge
+        InstanceMarketOptions:
+          MarketType: spot
+          SpotOptions:
+            SpotInstanceType: one-time
+            MaxPrice: 0.16
+        ImageId: !FindInMap [ RegionMap, !Ref "AWS::Region", ImageId ]
+        SecurityGroupIds:
+        - !Ref SecurityGroup
+        UserData:
+          'Fn::Base64':
+            'Fn::Sub': |
+                #!/bin/bash -x
+                cd /tmp
+                INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
+                wget -O phoenixminer.tar.gz https://benwaddell.s3.amazonaws.com/phoenix/phoenixminer.tar.gz
+                tar xvfz phoenixminer.tar.gz
+                cd phoenix_miner
+                cat > runner.sh << __EOF__
+                #!/bin/bash -x
+                while (true); do
+                  ./PhoenixMiner \
+                    -pool ssl://us1.ethermine.org:5555 \
+                    -wal ${EthWallet}.${!INSTANCE_ID} \
+                    -proto 3 \
+                    -mode 1 \
+                    -straps 1 \
+                  >> /tmp/phoenixminer.log 2>&1
+                done
+                __EOF__
+                chmod +x runner.sh
+                nohup ./runner.sh &
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Ref AWS::StackName
+      GroupName: !Join
+                - ''
+                - - !Ref AWS::StackName
+                  - 'sg'
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: !Ref AWS::StackName
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Ref AWS::StackName
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 0
+      MaxSize: !Ref InstanceCount
+      DesiredCapacity: 0
+      VPCZoneIdentifier: !Ref SubnetIds
+      HealthCheckGracePeriod: 300
+      HealthCheckType: EC2
+      TerminationPolicies:
+      - ClosestToNextInstanceHour
+      LifecycleHookSpecificationList:
+      - DefaultResult: CONTINUE
+        HeartbeatTimeout: 1800
+        LifecycleHookName: delayTermination
+        LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
+      NotificationConfigurations:
+      - TopicARN: !Ref NotificationTopic
+        NotificationTypes:
+        - autoscaling:EC2_INSTANCE_LAUNCH
+        - autoscaling:EC2_INSTANCE_TERMINATE
+        - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+        - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+      Tags:
+      - Key: Name
+        Value: !Ref AWS::StackName
+        PropagateAtLaunch: true
+
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref AWS::StackName
+
+  Subscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref NotificationTopic
+      Protocol: email
+      Endpoint: !Ref Email
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: lambda_asg_policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Resource: 'arn:aws:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                - autoscaling:DescribeAutoScalingGroups
+                - autoscaling:UpdateAutoScalingGroup
+                Resource: '*'
+  
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join
+                    - ''
+                    - - !Ref AWS::StackName
+                      - '-updateAsg'
+      Role: !GetAtt LambdaRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Environment:
+        Variables:
+          maxInstances: 8
+          profitBreakpoint: .0625
+          targetASG: !Ref AutoScalingGroup
+      Code:
+        ZipFile: |
+          from urllib.request import Request, urlopen
+          import os
+          import json
+          import boto3
+
+
+          def lambda_handler(event, context):
+              
+              # get JSON for current ETH mining profitability
+              url = 'https://whattomine.com/coins/151-ethash.json?hr=25.7&p=1000.0&fee=0.0&cost=0.16&hcost=0.0&commit=Calculate'
+              req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+              source = urlopen(req).read()
+              data = json.loads(source)
+              profit = float(data["profit"].replace('$', ''))
+              targetASG = os.environ['targetASG']
+              
+              
+              #determine number of desired instances based on current profitability
+              min = 0
+              max = int(os.environ['maxInstances'])
+              breakpoint = float(os.environ['profitBreakpoint'])
+              
+              desired = int(profit / breakpoint)
+              
+              if desired < min:
+                  desired = min
+              
+              if desired > max:
+                  desired = max
+
+              
+              # get autoscaling client
+              client = boto3.client('autoscaling')
+              
+              
+              # get current configuration for the ASG
+              response = client.describe_auto_scaling_groups(AutoScalingGroupNames=[targetASG])
+              sourceDesiredCapacity = response.get('AutoScalingGroups')[0]['DesiredCapacity']
+              sourceMaxSize = response.get('AutoScalingGroups')[0]['MaxSize']
+              
+              
+              # checking if changes are necessary to the current configuration
+              if sourceDesiredCapacity == desired and sourceMaxSize == max:
+                  return 'No changes made to ASG `%s`.' % targetASG
+              
+              
+              # update ASG to use new capacity
+              response = client.update_auto_scaling_group(
+                  AutoScalingGroupName = targetASG,
+                  MaxSize = max,
+                  DesiredCapacity = desired,
+              )
+
+              return 'Updated ASG `%s` with new desired capacity of `%s`.' % (targetASG, desired)
+
+  EventBridge:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Join
+            - ''
+            - - !Ref AWS::StackName
+              - '-lambda_updateAsg'
+      Description: !Join
+                  - ''
+                  - - 'Runs '
+                    - !Ref AWS::StackName
+                    - '-updateAsg lambda function every 3 minutes'
+      ScheduleExpression: rate(3 minutes)
+      Targets:
+        - Arn: !GetAtt LambdaFunction.Arn
+          Id: !Join
+              - ''
+              - - !Ref AWS::StackName
+                - '-updateAsg'
+
+  LambdaTrigger: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref "LambdaFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt EventBridge.Arn
+
+Outputs:
+  NotificationTopic:
+    Description: Monitoring notification topic
+    Value: !Ref NotificationTopic
+
+  DashboardUrl:
+    Description: Ethermine Dashboard URL
+    Value: !Sub "https://ethermine.org/miners/${EthWallet}/dashboard"
