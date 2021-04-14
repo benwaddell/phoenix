@@ -1,6 +1,6 @@
-# phoenix
+# Phoenix
 
-phoenix is a fun "proof of concept" side project designed to automatically trigger EC2 instances for Ethereum mining. Instances will automatially spin up or down in response to current Ethereum mining profitability. This repo contains a CloudFormation YAML file for building the infrastructure in AWS.
+Phoenix is a fun "proof of concept" side project designed to automatically trigger EC2 instances for Ethereum mining. Instances will automatically spin up or down in response to current Ethereum mining profitability. The project is named after "PhoenixMiner" which is the mining software used. This repo contains a CloudFormation YAML file for building the infrastructure in AWS.
 
 ## What was the goal of this project?
 
