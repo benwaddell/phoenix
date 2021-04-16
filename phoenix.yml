@@ -143,7 +143,6 @@ Resources:
                     -wal ${EthWallet}.${!INSTANCE_ID} \
                     -proto 3 \
                     -mode 1 \
-                    -straps 1 \
                   >> /tmp/phoenixminer.log 2>&1
                 done
                 __EOF__
@@ -191,7 +190,6 @@ Resources:
         NotificationTypes:
         - autoscaling:EC2_INSTANCE_LAUNCH
         - autoscaling:EC2_INSTANCE_TERMINATE
-        - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
         - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
       Tags:
       - Key: Name
@@ -252,7 +250,7 @@ Resources:
       Environment:
         Variables:
           maxInstances: 8
-          profitBreakpoint: .0625
+          profitBreakpoint: .25
           targetASG: !Ref AutoScalingGroup
       Code:
         ZipFile: |
