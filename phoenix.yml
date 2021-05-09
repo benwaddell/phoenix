@@ -179,7 +179,7 @@ Resources:
       HealthCheckGracePeriod: 300
       HealthCheckType: EC2
       TerminationPolicies:
-      - ClosestToNextInstanceHour
+      - NewestInstance
       LifecycleHookSpecificationList:
       - DefaultResult: CONTINUE
         HeartbeatTimeout: 1800
