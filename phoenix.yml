@@ -17,7 +17,7 @@ Metadata:
       - Label:
           default: Instance Configuration
         Parameters:
-        - InstanceCount
+        - MaxInstanceCount
 
       - Label:
           default: Networking Configuration
@@ -36,7 +36,7 @@ Parameters:
     Type: String
     Description: Email for Notifications
 
-  InstanceCount:
+  MaxInstanceCount:
     Type: Number
     Description: Max Number of Instances
     Default: 1
@@ -173,7 +173,7 @@ Resources:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
       MinSize: 0
-      MaxSize: !Ref InstanceCount
+      MaxSize: !Ref MaxInstanceCount
       DesiredCapacity: 0
       VPCZoneIdentifier: !Ref SubnetIds
       HealthCheckGracePeriod: 300
