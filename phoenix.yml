@@ -198,10 +198,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: !Ref AWS::StackName
-      GroupName: !Join
-                - ''
-                - - !Ref AWS::StackName
-                  - 'sg'
+      GroupName: !Sub '${AWS::StackName}-sg'
       VpcId: !Ref VpcId
       SecurityGroupEgress:
       - IpProtocol: -1
@@ -223,9 +220,10 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       HealthCheckGracePeriod: 300
       HealthCheckType: EC2
+      CapacityRebalance: False
       TerminationPolicies:
       - Default
-      Cooldown: 1800
+      Cooldown: 3600
       NotificationConfigurations:
       - TopicARN: !Ref NotificationTopic
         NotificationTypes:
@@ -275,16 +273,13 @@ Resources:
               - Effect: Allow
                 Action:
                 - autoscaling:DescribeAutoScalingGroups
-                - autoscaling:UpdateAutoScalingGroup
-                Resource: '*'
+                - autoscaling:SetDesiredCapacity
+                Resource: !Sub 'arn:aws:autoscaling:${AWS::Region}:*:autoScalingGroup:*:autoScalingGroupName/${AutoScalingGroup}'
   
   LambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Join
-                    - ''
-                    - - !Ref AWS::StackName
-                      - '-updateAsg'
+      FunctionName: !Sub '${AWS::StackName}-updateAsg'
       Role: !GetAtt LambdaRole.Arn
       Handler: index.lambda_handler
       Runtime: python3.8
@@ -322,64 +317,39 @@ Resources:
               
               # exit function if profit below minimum daily profit
               if profit < minDailyProfit:
-                return None
+                return 'Daily profit below minimum required'
 
-              # determine number of desired instances based on current profitability
-              min = 0
-              max = maxInstances
-              
+              # determine number of desired instances based on current profitability          
               desired = int(profit / profitBreakpoint) * instanceScaleQty
-              
-              if desired < min:
-                  desired = min
-              
-              if desired > max:
-                  desired = max
-
-              
+                          
               # get autoscaling client
               client = boto3.client('autoscaling')
-              
-              
+                            
               # get current configuration for the ASG
               response = client.describe_auto_scaling_groups(AutoScalingGroupNames=[targetASG])
               sourceDesiredCapacity = response.get('AutoScalingGroups')[0]['DesiredCapacity']
-              sourceMaxSize = response.get('AutoScalingGroups')[0]['MaxSize']
-              
-              
+                            
               # checking if changes are necessary to the current configuration
-              if sourceDesiredCapacity == desired and sourceMaxSize == max:
+              if sourceDesiredCapacity == desired:
                   return 'No changes made to ASG `%s`.' % targetASG
-              
-              
+                            
               # update ASG to use new capacity
-              response = client.update_auto_scaling_group(
+              response = client.set_desired_capacity(
                   AutoScalingGroupName = targetASG,
-                  MaxSize = max,
                   DesiredCapacity = desired,
+                  HonorCooldown = True
               )
-
               return 'Updated ASG `%s` with new desired capacity of `%s`.' % (targetASG, desired)
 
   EventBridge:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Join
-            - ''
-            - - !Ref AWS::StackName
-              - '-lambda_updateAsg'
-      Description: !Join
-                  - ''
-                  - - 'Runs '
-                    - !Ref AWS::StackName
-                    - '-updateAsg lambda function every 3 minutes'
+      Name: !Sub '${AWS::StackName}-lambda_updateAsg'
+      Description: !Sub 'Runs ${AWS::StackName}-updateAsg lambda function every 3 minutes'
       ScheduleExpression: rate(3 minutes)
       Targets:
         - Arn: !GetAtt LambdaFunction.Arn
-          Id: !Join
-              - ''
-              - - !Ref AWS::StackName
-                - '-updateAsg'
+          Id: !Sub '${AWS::StackName}-updateAsg'
 
   LambdaTrigger: 
     Type: AWS::Lambda::Permission
