@@ -312,18 +312,23 @@ Resources:
               source = urlopen(req).read()
               data = json.loads(source)
               profit = float(data["profit"].replace('$', ''))
+
+              # set environment variables
+              maxInstances = int(os.environ['maxInstances'])
+              instanceScaleQty = int(os.environ['instanceScaleQty'])
+              minDailyProfit = float(os.environ['minDailyProfit'])
+              profitBreakpoint = float(os.environ['profitBreakpoint'])
               targetASG = os.environ['targetASG']
               
               # exit function if profit below minimum daily profit
-              if profit < os.environ['minDailyProfit']:
+              if profit < minDailyProfit:
                 return None
 
               # determine number of desired instances based on current profitability
               min = 0
-              max = int(os.environ['maxInstances'])
-              breakpoint = float(os.environ['profitBreakpoint'])
+              max = maxInstances
               
-              desired = int(profit / breakpoint)*os.environ['instanceScaleQty']
+              desired = int(profit / profitBreakpoint) * instanceScaleQty
               
               if desired < min:
                   desired = min
