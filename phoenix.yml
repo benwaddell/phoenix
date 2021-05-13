@@ -8,6 +8,9 @@ Metadata:
           default: Miner Configuration
         Parameters:
         - EthWallet
+        - MinDailyProfit
+        - ProfitBreakpoint
+        - InstanceScaleQty
 
       - Label:
           default: SNS Configuration
@@ -17,7 +20,7 @@ Metadata:
       - Label:
           default: Instance Configuration
         Parameters:
-        - MaxInstanceCount
+        - MaxInstances
 
       - Label:
           default: Networking Configuration
@@ -32,15 +35,33 @@ Parameters:
     Default: "0x90F06BDB6567982cF103c9317887d8Fb943D8DfB"
     AllowedPattern: "0x[0-9a-fA-F]+"
 
+  MinDailyProfit:
+    Type: Number
+    Description: Minimum daily profit required per instance (in dollars)
+    Default: 0.25
+    MinValue: 0.00
+
+  ProfitBreakpoint:
+    Type: Number
+    Description: Daily profit intervals at which additional instances should scale out/in (in dollars)
+    Default: 0.25
+    MinValue: 0.00
+
+  InstanceScaleQty:
+    Type: Number
+    Description: Number of instances to launch or terminate per scaling activity
+    Default: 2
+    MinValue: 1
+
   Email:
     Type: String
     Description: Email for Notifications
 
-  MaxInstanceCount:
+  MaxInstances:
     Type: Number
     Description: Max Number of Instances
     Default: 1
-    MaxValue: 8
+    MinValue: 1
 
   VpcId:
     Description: The VPC where this stack will be deployed
@@ -197,18 +218,14 @@ Resources:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
       MinSize: 0
-      MaxSize: !Ref MaxInstanceCount
+      MaxSize: !Ref MaxInstances
       DesiredCapacity: 0
       VPCZoneIdentifier: !Ref SubnetIds
       HealthCheckGracePeriod: 300
       HealthCheckType: EC2
       TerminationPolicies:
-      - NewestInstance
-      LifecycleHookSpecificationList:
-      - DefaultResult: CONTINUE
-        HeartbeatTimeout: 1800
-        LifecycleHookName: delayTermination
-        LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
+      - Default
+      Cooldown: 1800
       NotificationConfigurations:
       - TopicARN: !Ref NotificationTopic
         NotificationTypes:
@@ -273,9 +290,12 @@ Resources:
       Runtime: python3.8
       Environment:
         Variables:
-          maxInstances: !Ref MaxInstanceCount
-          profitBreakpoint: .25
+          maxInstances: !Ref MaxInstances
+          instanceScaleQty: !Ref InstanceScaleQty
+          minDailyProfit: !Ref MinDailyProfit
+          profitBreakpoint: !Ref ProfitBreakpoint
           targetASG: !Ref AutoScalingGroup
+
       Code:
         ZipFile: |
           from urllib.request import Request, urlopen
@@ -294,13 +314,16 @@ Resources:
               profit = float(data["profit"].replace('$', ''))
               targetASG = os.environ['targetASG']
               
-              
+              # exit function if profit below minimum daily profit
+              if profit < os.environ['minDailyProfit']:
+                return None
+
               # determine number of desired instances based on current profitability
               min = 0
               max = int(os.environ['maxInstances'])
               breakpoint = float(os.environ['profitBreakpoint'])
               
-              desired = int((profit / breakpoint)*2)
+              desired = int(profit / breakpoint)*os.environ['instanceScaleQty']
               
               if desired < min:
                   desired = min
