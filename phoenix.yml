@@ -52,42 +52,60 @@ Parameters:
 
 Mappings:
   # ImageId of 'Deep Learning AMI (Amazon Linux 2) Version 43.0' in each region
+  # Pool for closest Ethermine.org pool server to give lowest mining latency
   RegionMap:
     us-east-1:
       ImageId: ami-078a331927399adac
+      Pool: us1.ethermine.org
     us-east-2:
       ImageId: ami-01f22c507c1d9f7fa
+      Pool: us1.ethermine.org
     us-west-1:
       ImageId: ami-0d1d8de6730f8d064
+      Pool: us2.ethermine.org
     us-west-2:
       ImageId: ami-0ccf6f8b8d4a3e973
+      Pool: us2.ethermine.org
     ca-central-1:
       ImageId: ami-0e1528bead6d8257c
+      Pool: us1.ethermine.org
     eu-central-1:
       ImageId: ami-047b1df698e2b5869
+      Pool: eu1.ethermine.org
     eu-north-1:
       ImageId: ami-0dd383b807a1ac346
+      Pool: eu1.ethermine.org
     eu-west-1:
       ImageId: ami-00ad6b44adca6dc28
+      Pool: eu1.ethermine.org
     eu-west-2:
       ImageId: ami-04b2ab026947c29f4
+      Pool: eu1.ethermine.org
     eu-west-3:
       ImageId: ami-013e7060964097c4a
+      Pool: eu1.ethermine.org
     ap-northeast-1:
       ImageId: ami-0a048955642dc77c8
+      Pool: asia1.ethermine.org
     ap-northeast-2:
       ImageId: ami-00639315e1edf7170
+      Pool: asia1.ethermine.org
     ap-northeast-3:
       ImageId: ami-09b36a81a49169236
+      Pool: asia1.ethermine.org
     ap-south-1:
       ImageId: ami-0e3a482a6c20b8dca
+      Pool: asia1.ethermine.org
     ap-southeast-1:
       ImageId: ami-03820a4d467af06b4
+      Pool: asia1.ethermine.org
     ap-southeast-2:
       ImageId: ami-01d0d5aefa68500f2
+      Pool: asia1.ethermine.org
     sa-east-1:
       ImageId: ami-06456fc37cf1c0923
-
+      Pool: us2.ethermine.org
+      
 Resources:
 
   InstanceRole:
@@ -123,12 +141,13 @@ Resources:
           SpotOptions:
             SpotInstanceType: one-time
             MaxPrice: 0.16
-        ImageId: !FindInMap [ RegionMap, !Ref "AWS::Region", ImageId ]
+        ImageId: !FindInMap [ RegionMap, !Ref AWS::Region, ImageId ]
         SecurityGroupIds:
         - !Ref SecurityGroup
         UserData:
           'Fn::Base64':
-            'Fn::Sub': |
+            'Fn::Sub':
+              - |
                 #!/bin/bash -x
                 cd /tmp
                 INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
@@ -139,8 +158,8 @@ Resources:
                 #!/bin/bash -x
                 while (true); do
                   ./PhoenixMiner \
-                    -pool ssl://us1.ethermine.org:5555 \
-                    -wal ${EthWallet}.${!INSTANCE_ID} \
+                    -pool ssl://${server}:5555 \
+                    -wal ${EthWallet}.${region}_${!INSTANCE_ID} \
                     -proto 3 \
                     -mode 1 \
                   >> /tmp/phoenixminer.log 2>&1
@@ -148,6 +167,11 @@ Resources:
                 __EOF__
                 chmod +x runner.sh
                 nohup ./runner.sh &
+
+              - {
+                region: !Ref AWS::Region,
+                server: !FindInMap [ RegionMap, !Ref AWS::Region, Pool ]
+                }
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -249,7 +273,7 @@ Resources:
       Runtime: python3.8
       Environment:
         Variables:
-          maxInstances: 8
+          maxInstances: !Ref MaxInstanceCount
           profitBreakpoint: .25
           targetASG: !Ref AutoScalingGroup
       Code:
@@ -263,7 +287,7 @@ Resources:
           def lambda_handler(event, context):
               
               # get JSON for current ETH mining profitability
-              url = 'https://whattomine.com/coins/151-ethash.json?hr=25.7&p=1000.0&fee=0.0&cost=0.16&hcost=0.0&commit=Calculate'
+              url = 'https://whattomine.com/coins/151-ethash.json?hr=25.0&p=1000.0&fee=0.0&cost=0.16&hcost=0.0&commit=Calculate'
               req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
               source = urlopen(req).read()
               data = json.loads(source)
@@ -271,12 +295,12 @@ Resources:
               targetASG = os.environ['targetASG']
               
               
-              #determine number of desired instances based on current profitability
+              # determine number of desired instances based on current profitability
               min = 0
               max = int(os.environ['maxInstances'])
               breakpoint = float(os.environ['profitBreakpoint'])
               
-              desired = int(profit / breakpoint)
+              desired = int((profit / breakpoint)*2)
               
               if desired < min:
                   desired = min
@@ -332,7 +356,7 @@ Resources:
   LambdaTrigger: 
     Type: AWS::Lambda::Permission
     Properties: 
-      FunctionName: !Ref "LambdaFunction"
+      FunctionName: !Ref LambdaFunction
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt EventBridge.Arn
