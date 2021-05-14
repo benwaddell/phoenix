@@ -272,7 +272,6 @@ Resources:
                 Resource: 'arn:aws:logs:*:*:*'
               - Effect: Allow
                 Action:
-                - autoscaling:DescribeAutoScalingGroups
                 - autoscaling:SetDesiredCapacity
                 Resource: !Sub 'arn:aws:autoscaling:${AWS::Region}:*:autoScalingGroup:*:autoScalingGroupName/${AutoScalingGroup}'
   
@@ -302,7 +301,7 @@ Resources:
           def lambda_handler(event, context):
               
               # get JSON for current ETH mining profitability
-              url = 'https://whattomine.com/coins/151-ethash.json?hr=25.0&p=1000.0&fee=0.0&cost=0.16&hcost=0.0&commit=Calculate'
+              url = 'https://whattomine.com/coins/151-ethash.json?hr=25.0&p=1000.0&fee=0.0&cost=0.16&hcost=0.0&span_br=1h&span_d=1h&commit=Calculate'
               req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
               source = urlopen(req).read()
               data = json.loads(source)
@@ -324,15 +323,7 @@ Resources:
                           
               # get autoscaling client
               client = boto3.client('autoscaling')
-                            
-              # get current configuration for the ASG
-              response = client.describe_auto_scaling_groups(AutoScalingGroupNames=[targetASG])
-              sourceDesiredCapacity = response.get('AutoScalingGroups')[0]['DesiredCapacity']
-                            
-              # checking if changes are necessary to the current configuration
-              if sourceDesiredCapacity == desired:
-                  return 'No changes made to ASG `%s`.' % targetASG
-                            
+
               # update ASG to use new capacity
               response = client.set_desired_capacity(
                   AutoScalingGroupName = targetASG,
