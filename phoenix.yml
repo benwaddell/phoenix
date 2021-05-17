@@ -147,7 +147,7 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      Roles:
+      Roles: 
       - !Ref InstanceRole
 
   LaunchTemplate:
@@ -274,6 +274,13 @@ Resources:
                 Action:
                 - autoscaling:SetDesiredCapacity
                 Resource: !Sub 'arn:aws:autoscaling:${AWS::Region}:*:autoScalingGroup:*:autoScalingGroupName/${AutoScalingGroup}'
+              - Effect: Allow
+                Action:
+                - ec2:TerminateInstances
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/aws:ec2launchtemplate:id: !Ref LaunchTemplate
   
   LambdaFunction:
     Type: AWS::Lambda::Function
@@ -289,6 +296,8 @@ Resources:
           minDailyProfit: !Ref MinDailyProfit
           profitBreakpoint: !Ref ProfitBreakpoint
           targetASG: !Ref AutoScalingGroup
+          ethWallet: !Ref EthWallet
+          instanceName: !Ref AWS::StackName
 
       Code:
         ZipFile: |
@@ -299,38 +308,99 @@ Resources:
 
 
           def lambda_handler(event, context):
-              
+
+
+            def set_desired():
               # get JSON for current ETH mining profitability
               url = 'https://whattomine.com/coins/151-ethash.json?hr=25.0&p=1000.0&fee=0.0&cost=0.16&hcost=0.0&span_br=1h&span_d=1h&commit=Calculate'
               req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-              source = urlopen(req).read()
-              data = json.loads(source)
+              query = urlopen(req).read()
+              data = json.loads(query)
               profit = float(data["profit"].replace('$', ''))
 
-              # set environment variables
+              # get environment variables
               maxInstances = int(os.environ['maxInstances'])
               instanceScaleQty = int(os.environ['instanceScaleQty'])
               minDailyProfit = float(os.environ['minDailyProfit'])
               profitBreakpoint = float(os.environ['profitBreakpoint'])
               targetASG = os.environ['targetASG']
               
-              # exit function if profit below minimum daily profit
-              if profit < minDailyProfit:
-                return 'Daily profit below minimum required'
-
               # determine number of desired instances based on current profitability          
-              desired = int(profit / profitBreakpoint) * instanceScaleQty
+              if profit < minDailyProfit:
+                desired = 0
+              else:
+                desired = int(profit / profitBreakpoint) * instanceScaleQty
                           
               # get autoscaling client
               client = boto3.client('autoscaling')
 
-              # update ASG to use new capacity
-              response = client.set_desired_capacity(
+              # update ASG to use new capacity (immediately if profit is <= $0.00, otherwise honor scaling cooldown)
+              if profit <= 0:
+                response = client.set_desired_capacity(
+                  AutoScalingGroupName = targetASG,
+                  DesiredCapacity = 0,
+                )
+
+              else:
+                response = client.set_desired_capacity(
                   AutoScalingGroupName = targetASG,
                   DesiredCapacity = desired,
                   HonorCooldown = True
-              )
-              return 'Updated ASG `%s` with new desired capacity of `%s`.' % (targetASG, desired)
+                )
+              return f'Updated ASG {targetASG} with new desired capacity of {desired}.'
+
+
+            def purge_slow_workers():
+
+              # get environment variables
+              ethWallet = os.environ['ethWallet']
+              instanceName = os.environ['instanceName']
+
+              # get JSON for current ETH mining profitability
+              url = f'https://api.ethermine.org/miner/{ethWallet}/workers'
+              req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+              query = urlopen(req).read()
+              data = json.loads(query)['data']
+
+              # get info of running ec2 instances in stack
+                stack_filter = [
+                  {
+                    'Name':'tag:Name',
+                    'Values': [instanceName]
+                  }
+                ]
+                runningInstances = str(client.describe_instances(Filters=stack_filter))
+              
+              # variable for reported and minimum acceptable hashrate
+              minHash = 23000000
+              
+              # variable for slow workers list
+              slowWorkers = []
+              
+              # check hashrate of all instances and add to list if below minHash
+              for worker in data:
+                  if worker['reportedHashrate'] < minHash:
+                    slowWorker = worker['worker'].split('_')[1]
+                    if slowWorker in runningInstances:
+                      slowWorkers.append(slowWorker)
+
+              if slowWorkers:
+                # get autoscaling client
+                client = boto3.client('ec2')
+                
+                # terminate slow workers
+                response = client.terminate_instances(
+                  InstanceIds = slowWorkers
+                )
+                return f'Terminated the following underperforming instances: {slowWorkers}'
+                
+              else:
+                return 'No underperforming instances at the moment.'
+
+            set_desired()
+            purge_slow_workers()
+
+            return 'Function completed successfully'
 
   EventBridge:
     Type: AWS::Events::Rule
