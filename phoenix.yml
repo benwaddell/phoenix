@@ -358,9 +358,9 @@ Resources:
                 response = client.terminate_instances(
                   InstanceIds = slowWorkers
                 )
-                print(f'Terminated the following underperforming instance(s): {slowWorkers}.')              
+                print(f'[WORKERS] Terminated the following underperforming instance(s): {slowWorkers}.')              
               else:
-                print('No underperforming instances at the moment.')
+                print('[WORKERS] No underperforming instances at the moment.')
 
 
             def set_desired():
@@ -395,7 +395,7 @@ Resources:
 
               # checking if changes are necessary to the current configuration
               if desired == currentDesiredCapacity:
-                print(f'{targetASG} ASG already at desired capacity.')
+                print(f'[ASG] {targetASG} ASG already at desired capacity.')
 
               # update ASG to use new capacity (immediately if substantial changes, otherwise honor scaling cooldown)
               elif desired < (currentDesiredCapacity / 2) or desired > (currentDesiredCapacity * 2):
@@ -403,14 +403,14 @@ Resources:
                   AutoScalingGroupName = targetASG,
                   DesiredCapacity = desired,
                 )
-                print(f'Updated {targetASG} ASG with new desired capacity of {desired}.')
+                print(f'[ASG] Updated {targetASG} ASG with new desired capacity of {desired}.')
 
               elif profit <= 0:
                 response = client.set_desired_capacity(
                   AutoScalingGroupName = targetASG,
                   DesiredCapacity = 0,
                 )
-                print(f'Updated {targetASG} ASG with new desired capacity of 0.')
+                print(f'[ASG] Updated {targetASG} ASG with new desired capacity of 0.')
 
               else:
                 try:
@@ -419,9 +419,9 @@ Resources:
                     DesiredCapacity = desired,
                     HonorCooldown = True
                   )
-                  print(f'Updated {targetASG} ASG with new desired capacity of {desired}.')
+                  print(f'[ASG] Updated {targetASG} ASG with new desired capacity of {desired}.')
                 except Exception:
-                  print(f'Unable to update {targetASG} ASG with new desired capacity of {desired}. Scaling cooldown likely blocking action.')
+                  print(f'[ASG] Unable to update {targetASG} ASG with new desired capacity of {desired}. Scaling cooldown likely blocking action.')
                   pass
 
             purge_slow_workers()
