@@ -223,7 +223,7 @@ Resources:
       CapacityRebalance: False
       TerminationPolicies:
       - Default
-      Cooldown: 3600
+      Cooldown: 1800
       NotificationConfigurations:
       - TopicARN: !Ref NotificationTopic
         NotificationTypes:
@@ -272,6 +272,10 @@ Resources:
                 Resource: 'arn:aws:logs:*:*:*'
               - Effect: Allow
                 Action:
+                - autoscaling:DescribeAutoscalingGroups
+                Resource: '*'
+              - Effect: Allow
+                Action:
                 - autoscaling:SetDesiredCapacity
                 Resource: !Sub 'arn:aws:autoscaling:${AWS::Region}:*:autoScalingGroup:*:autoScalingGroupName/${AutoScalingGroup}'
               - Effect: Allow
@@ -293,7 +297,7 @@ Resources:
       Role: !GetAtt LambdaRole.Arn
       Handler: index.lambda_handler
       Runtime: python3.8
-      Timeout: 5
+      Timeout: 10
       Environment:
         Variables:
           maxInstances: !Ref MaxInstances
@@ -354,10 +358,9 @@ Resources:
                 response = client.terminate_instances(
                   InstanceIds = slowWorkers
                 )
-                return f'Terminated the following underperforming instances: {slowWorkers}'
-                
+                print(f'Terminated the following underperforming instance(s): {slowWorkers}.')              
               else:
-                return 'No underperforming instances at the moment.'
+                print('No underperforming instances at the moment.')
 
 
             def set_desired():
@@ -380,26 +383,45 @@ Resources:
                 desired = 0
               else:
                 desired = int(profit / profitBreakpoint) * instanceScaleQty
+                if desired > maxInstances:
+                  desired = maxInstances
                           
               # get autoscaling client
               client = boto3.client('autoscaling')
 
-              # update ASG to use new capacity (immediately if profit is <= $0.00, otherwise honor scaling cooldown)
-              if profit <= 0:
+              # get current configuration for the ASG
+              response = client.describe_auto_scaling_groups(AutoScalingGroupNames=[targetASG])
+              currentDesiredCapacity = response.get('AutoScalingGroups')[0]['DesiredCapacity']
+
+              # checking if changes are necessary to the current configuration
+              if desired == currentDesiredCapacity:
+                print(f'{targetASG} ASG already at desired capacity.')
+
+              # update ASG to use new capacity (immediately if substantial changes, otherwise honor scaling cooldown)
+              elif desired < (currentDesiredCapacity / 2) or desired > (currentDesiredCapacity * 2):
+                response = client.set_desired_capacity(
+                  AutoScalingGroupName = targetASG,
+                  DesiredCapacity = desired,
+                )
+                print(f'Updated {targetASG} ASG with new desired capacity of {desired}.')
+
+              elif profit <= 0:
                 response = client.set_desired_capacity(
                   AutoScalingGroupName = targetASG,
                   DesiredCapacity = 0,
                 )
+                print(f'Updated {targetASG} ASG with new desired capacity of 0.')
 
-              elif desired < maxInstances:
+              else:
                 try:
                   response = client.set_desired_capacity(
                     AutoScalingGroupName = targetASG,
                     DesiredCapacity = desired,
                     HonorCooldown = True
                   )
-                  return f'Updated ASG {targetASG} with new desired capacity of {desired}.'
+                  print(f'Updated {targetASG} ASG with new desired capacity of {desired}.')
                 except Exception:
+                  print(f'Unable to update {targetASG} ASG with new desired capacity of {desired}. Scaling cooldown likely blocking action.')
                   pass
 
             purge_slow_workers()
