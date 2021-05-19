@@ -260,7 +260,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Policies:
-        - PolicyName: lambda_asg_policy
+        - PolicyName: lambda_ec2_policy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -276,6 +276,10 @@ Resources:
                 Resource: !Sub 'arn:aws:autoscaling:${AWS::Region}:*:autoScalingGroup:*:autoScalingGroupName/${AutoScalingGroup}'
               - Effect: Allow
                 Action:
+                - ec2:DescribeInstances
+                Resource: '*'
+              - Effect: Allow
+                Action:
                 - ec2:TerminateInstances
                 Resource: '*'
                 Condition:
@@ -289,6 +293,7 @@ Resources:
       Role: !GetAtt LambdaRole.Arn
       Handler: index.lambda_handler
       Runtime: python3.8
+      Timeout: 5
       Environment:
         Variables:
           maxInstances: !Ref MaxInstances
@@ -308,6 +313,51 @@ Resources:
 
 
           def lambda_handler(event, context):
+
+            def purge_slow_workers():
+
+              # get environment variables
+              ethWallet = os.environ['ethWallet']
+              instanceName = os.environ['instanceName']
+
+              # get JSON for current workers
+              url = f'https://api.ethermine.org/miner/{ethWallet}/workers'
+              req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+              query = urlopen(req).read()
+              data = json.loads(query)['data']
+
+              # get ec2 client
+              client = boto3.client('ec2')
+
+              # get info of running ec2 instances in stack
+              stack_filter = [
+                {'Name':'tag:Name', 'Values': [instanceName]},
+                {'Name':'instance-state-name', 'Values': ['running']}
+              ]
+              runningInstances = str(client.describe_instances(Filters=stack_filter))
+              
+              # variable for reported and minimum acceptable hashrate
+              minHash = 24000000
+              
+              # variable for slow workers list
+              slowWorkers = []
+              
+              # check hashrate of all instances and add to list if below minHash
+              for worker in data:
+                  if worker['reportedHashrate'] < minHash:
+                    slowWorker = worker['worker'].split('_')[1]
+                    if slowWorker in runningInstances:
+                      slowWorkers.append(slowWorker)
+
+              if slowWorkers:               
+                # terminate slow workers
+                response = client.terminate_instances(
+                  InstanceIds = slowWorkers
+                )
+                return f'Terminated the following underperforming instances: {slowWorkers}'
+                
+              else:
+                return 'No underperforming instances at the moment.'
 
 
             def set_desired():
@@ -341,64 +391,19 @@ Resources:
                   DesiredCapacity = 0,
                 )
 
-              else:
-                response = client.set_desired_capacity(
-                  AutoScalingGroupName = targetASG,
-                  DesiredCapacity = desired,
-                  HonorCooldown = True
-                )
-              return f'Updated ASG {targetASG} with new desired capacity of {desired}.'
+              elif desired < maxInstances:
+                try:
+                  response = client.set_desired_capacity(
+                    AutoScalingGroupName = targetASG,
+                    DesiredCapacity = desired,
+                    HonorCooldown = True
+                  )
+                  return f'Updated ASG {targetASG} with new desired capacity of {desired}.'
+                except Exception:
+                  pass
 
-
-            def purge_slow_workers():
-
-              # get environment variables
-              ethWallet = os.environ['ethWallet']
-              instanceName = os.environ['instanceName']
-
-              # get JSON for current ETH mining profitability
-              url = f'https://api.ethermine.org/miner/{ethWallet}/workers'
-              req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-              query = urlopen(req).read()
-              data = json.loads(query)['data']
-
-              # get info of running ec2 instances in stack
-                stack_filter = [
-                  {
-                    'Name':'tag:Name',
-                    'Values': [instanceName]
-                  }
-                ]
-                runningInstances = str(client.describe_instances(Filters=stack_filter))
-              
-              # variable for reported and minimum acceptable hashrate
-              minHash = 23000000
-              
-              # variable for slow workers list
-              slowWorkers = []
-              
-              # check hashrate of all instances and add to list if below minHash
-              for worker in data:
-                  if worker['reportedHashrate'] < minHash:
-                    slowWorker = worker['worker'].split('_')[1]
-                    if slowWorker in runningInstances:
-                      slowWorkers.append(slowWorker)
-
-              if slowWorkers:
-                # get autoscaling client
-                client = boto3.client('ec2')
-                
-                # terminate slow workers
-                response = client.terminate_instances(
-                  InstanceIds = slowWorkers
-                )
-                return f'Terminated the following underperforming instances: {slowWorkers}'
-                
-              else:
-                return 'No underperforming instances at the moment.'
-
-            set_desired()
             purge_slow_workers()
+            set_desired()
 
             return 'Function completed successfully'
 
