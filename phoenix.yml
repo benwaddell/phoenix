@@ -3,6 +3,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Metadata:
   RepoUrl: https://github.com/btw1217/phoenix
   AWS::CloudFormation::Interface:
+    # Creating parameters to be defined by the user
     ParameterGroups:
       - Label:
           default: Miner Configuration
@@ -28,6 +29,7 @@ Metadata:
         - VpcId
         - SubnetIds
 
+# Defining parameter configuration
 Parameters:
   EthWallet:
     Type: String
@@ -71,9 +73,10 @@ Parameters:
     Description: At least 3 subnets where the instances will be deployed
     Type: List<AWS::EC2::Subnet::Id>
 
+# Creating region-based mappings to specify region specific configs
+# ImageId of 'Amazon Linux 2 AMI with NVIDIA TESLA GPU Driver' in each region
+# Pool for closest Ethermine.org pool server to give lowest mining latency
 Mappings:
-  # ImageId of 'Amazon Linux 2 AMI with NVIDIA TESLA GPU Driver' in each region
-  # Pool for closest Ethermine.org pool server to give lowest mining latency
   RegionMap:
     us-east-1:
       ImageId: ami-0bd192ce8e12d77d6
@@ -129,6 +132,7 @@ Mappings:
       
 Resources:
 
+  # Configuration for EC2 instances
   InstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -150,6 +154,7 @@ Resources:
       Roles: 
       - !Ref InstanceRole
 
+  # Configuration for EC2 launch template
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -194,6 +199,7 @@ Resources:
                 server: !FindInMap [ RegionMap, !Ref AWS::Region, Pool ]
                 }
 
+  # Configuration for EC2 security group
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -207,6 +213,7 @@ Resources:
       - Key: Name
         Value: !Ref AWS::StackName
 
+  # Configuration for EC2 autoscaling group
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -235,11 +242,13 @@ Resources:
         Value: !Ref AWS::StackName
         PropagateAtLaunch: true
 
+  # Configuration for SNS notification topic for EC2 alerts
   NotificationTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Ref AWS::StackName
 
+  # Configuration for SNS subscription for EC2 alerts
   Subscription:
     Type: AWS::SNS::Subscription
     Properties:
@@ -247,6 +256,7 @@ Resources:
       Protocol: email
       Endpoint: !Ref Email
 
+  # Configuration for Lambda IAM role
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -290,6 +300,7 @@ Resources:
                   StringEquals:
                     ec2:ResourceTag/aws:ec2launchtemplate:id: !Ref LaunchTemplate
   
+  # Configuration for Lambda function to calculate mining profitability, update autoscaling group, and purge slow workers
   LambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -429,6 +440,7 @@ Resources:
 
             return 'Function completed successfully'
 
+ # Configuration for EventBridge rule to trigger Lambda function
   EventBridge:
     Type: AWS::Events::Rule
     Properties:
@@ -439,6 +451,7 @@ Resources:
         - Arn: !GetAtt LambdaFunction.Arn
           Id: !Sub '${AWS::StackName}-updateAsg'
 
+  # Configuration for Lambda permissions for EventBridge trigger
   LambdaTrigger: 
     Type: AWS::Lambda::Permission
     Properties: 
@@ -447,6 +460,7 @@ Resources:
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt EventBridge.Arn
 
+# Configuration for SNS and Ethermine Dashboard outputs
 Outputs:
   NotificationTopic:
     Description: Monitoring notification topic
