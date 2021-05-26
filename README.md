@@ -1,10 +1,22 @@
 # Phoenix
 
-Phoenix is a fun "proof of concept" side project designed to automatically trigger EC2 instances for Ethereum mining. Instances will automatically spin up or down in response to current Ethereum mining profitability. The project is named after "PhoenixMiner" which is the mining software used. This repo contains a CloudFormation YAML file for building the infrastructure in AWS.
+Phoenix is a fun "proof of concept" side project designed to automatically trigger EC2 instances for Ethereum mining. Instances will automatically spin up or down in response to current Ethereum mining profitability. The project is named after "PhoenixMiner" which is the mining software used. This repo contains a CloudFormation YAML file for building the stack in AWS.
 
 ## What was the goal of this project?
 
 The goal was mainly to develop something using multiple AWS resources and build some CloudFormation experience, while also having a little fun. AWS GPU instances are not cheap to operate, so currently the project fluctuates in and out of profitability and spends most of the time dormant. However occasionally I will get a notification that instances are spinning up, and it's fun to see.
+
+## AWS Resources Used
+
+This projects utilizes the following resources:
+
+ - EC2 (instances for running the miner)
+ - AutoScaling (to automatically scale instances)
+ - IAM (for managing resources roles anda access)
+ - Lambda (function to calculate mining profitability and adjust the AutoScaling Group, and terminate instances with unacceptable hashrates)
+ - EventBrige (triggers the Lambda function every 3 minutes)
+ - SNS (enables email notifications for scaling activities)
+
 
 ## How It Works
 
@@ -16,13 +28,13 @@ When you create the stack, it will prompt you to enter your Ethereum wallet addr
 
 ![alt text](https://benwaddell.s3.amazonaws.com/github/phoenix/stackdetails.png)
 
-Once the stack is created, a Lambda function will run every 3 minutes to get the current profitability of Ethereum mining. This is done by using the WhatToMine.com API to calculate the current rewards after deducting the AWS operating costs.
+Once the stack is created, a Lambda function will run every 3 minutes to get the current profitability of Ethereum mining. This is done by using the WhatToMine.com API to calculate the current rewards after subtracting the AWS operating costs.
 
-If the rewards outweigh the costs, the Lambda function will adjust the AutoScaling Group (ASG) to increase the minimum instance capacity. This will immediately trigger the ASG to create a new EC2 instance. The instance uses a "Deep Learning AMI" that is pre-configured with the necessary graphics drivers. The instance will download and extract PhoenixMiner, create a startup script to launch PhoenixMiner with your Ethereum wallet address, and then run the script.
+If the rewards outweigh the costs, the Lambda function will adjust the AutoScaling Group (ASG) to increase the desired instance capacity. This will immediately trigger the ASG to create a new EC2 instance. The instance uses a lightweight AMI that is pre-configured with the necessary graphics drivers. The instance will download and extract PhoenixMiner, create a startup script to launch PhoenixMiner with your Ethereum wallet address, and then run the script.
 
-Lambda will continue to check profitability every 3 minutes and gradually increase the minimum capacity as the profitability *increases*, until it reaches the "Max Number of Instances" specified during stack creation. As the minimum capacity increases, new instances will be deployed. If profitability *decreases*, Lambda will gradually reduce the ASG minimum instance capacity, which will begin terminating instances. Instances will not terminate until they have run for at least one hour, to prevent unnecessary frequent creations and terminations if the profitability bounces around. With each instance creation or termination, a notification will be sent, if you supplied your email address during stack creation.
+Lambda will continue to check profitability every 3 minutes and gradually increase the desired capacity as the profitability *increases*, until it reaches the "Max Number of Instances" specified during stack creation. As the desired capacity increases, new instances will be deployed. If profitability *decreases*, Lambda will gradually reduce the ASG desired instance capacity, which will begin terminating instances. Instance scaling honors a cooldown policy to prevent unnecessary frequent creations and terminations if the profitability bounces around. Once profitability reaches zero, any remaining instances will be terminated. Lambda will also check each active instance's reported hashrate by querying the Ethermine API and terminate any instances which are performing slowly. This will cause new instances to spin up to replace them and ensure that all instances are performing within an acceptable tolerance. With each instance creation or termination, a notification will be sent, if you supplied your email address during stack creation.
 
-The entire process is fully automated and you can "set it and forget it". Aside from the EC2 instances, all other resources are free to operate, so leaving the system in place should not cost anything until an instance is created, which only happens if it becomes profitable to do so.
+The entire process is fully automated and you can "set it and forget it". Aside from the EC2 instances, all other resources are free to operate, so leaving the system in place should not incur costs until an instance is created, which only happens if it becomes profitable to do so.
 
 
 ### Diagram:
