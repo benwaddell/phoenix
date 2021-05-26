@@ -12,7 +12,7 @@ This projects utilizes the following resources:
 
  - EC2 (instances for running the miner)
  - AutoScaling (to automatically scale instances)
- - IAM (for managing resources roles anda access)
+ - IAM (for managing resources roles and access)
  - Lambda (function to calculate mining profitability and adjust the AutoScaling Group, and terminate instances with unacceptable hashrates)
  - EventBrige (triggers the Lambda function every 3 minutes)
  - SNS (enables email notifications for scaling activities)
@@ -46,7 +46,7 @@ No, not exactly. Mining profits fluctuate depending on transaction fees (these g
 
 Some may argue that this is a poor use of AWS resources. I don't necessarily disagree, but since we are only using servers that are otherwise inactive (through Spot Pricing), we are not really taking away resources that are in demand elsewhere.
 
-Overall, this is not intended to be a "get rich" scheme, but instead a fun way to play around in AWS, while also earning some rewards in the process.
+Overall, this is not intended to be a "get rich scheme", but instead a fun way to play around in AWS, while also earning some rewards in the process.
 
 
 
